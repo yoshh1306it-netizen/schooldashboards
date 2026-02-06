@@ -364,8 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const path = 'data.json';
             const apiUrl = `https://api.github.com/repos/${gh.user}/${gh.repo}/contents/${path}`;
-            // 日本語文字化け防止のためにUnicodeエスケープなどが必要な場合があるが、
-            // ここでは簡易的に Base64 エンコードを行う
+            // Base64 エンコード
             const content = btoa(unescape(encodeURIComponent(JSON.stringify(appData, null, 2))));
 
             try {
@@ -374,7 +373,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Authorization': `token ${gh.token}` }
                 });
                 
-                // 初回作成時などで404ならshaは不要だが、基本は更新なので取得する
                 let sha = null;
                 if(getRes.ok) {
                     const getData = await getRes.json();
