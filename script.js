@@ -12,7 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
             {"start": "16:50", "end": "18:01"}
         ],
         "schedule": {
-            "21HR": { "Mon": { "1": "国語", "2": "数学" }, "Tue": { "1": "英語" } }
+            "21HR": { 
+                "Mon": { "1": "国語", "2": "数学", "3": "英語", "4": "理科", "5": "社会", "6": "体育", "7": "HR" }, 
+                "Tue": { "1": "英語", "2": "数学", "3": "国語", "4": "情報", "5": "芸術", "6": "理科", "7": "総合" } 
+            }
         },
         "tests": []
     };
@@ -49,7 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // 現在時刻をクエリにつけてキャッシュを回避し、常に最新を取得
             const timestamp = new Date().getTime();
-            // 自分のリポジトリURLに合わせて調整可。ローカルなら'data.json'
             let url = 'data.json';
             
             // GitHub Configがある場合はRaw URLから取得を試みる（生徒側）
@@ -61,6 +63,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(url);
             if (!response.ok) throw new Error("JSON読み込み失敗");
             appData = await response.json();
+            
+            // データが空っぽならデフォルトを使う
+            if(!appData.timings) throw new Error("データ破損");
+
         } catch (error) {
             console.warn("データ読み込み失敗、初期データを使用", error);
             appData = JSON.parse(JSON.stringify(DEFAULT_DATA));
@@ -132,6 +138,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 li.innerHTML = `<span class="period">${i}</span> <span class="subj">${subject}</span>`;
                 list.appendChild(li);
             }
+        }
+        
+        // 授業がない場合
+        if (list.children.length === 0) {
+            list.innerHTML = `<li style="justify-content:center; color:#aaa;">授業なし</li>`;
         }
     }
 
@@ -238,6 +249,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* === 6. テストカウントダウン === */
     function updateTestCountdown() {
+        // データがない場合のガード
+        if (!appData.tests || appData.tests.length === 0) {
+            document.getElementById('targetTestName').textContent = "予定なし";
+            document.getElementById('cdDays').textContent = "-";
+            return;
+        }
+
         const upcoming = appData.tests
             .map(t => ({name: t.name, date: new Date(t.date)}))
             .filter(t => t.date >= new Date())
@@ -274,7 +292,12 @@ document.addEventListener('DOMContentLoaded', () => {
             showPage('settings');
             const sel = document.getElementById('settingClassSelect');
             sel.innerHTML = '';
-            Object.keys(appData.schedule).forEach(cls => {
+            
+            // クラスリストの生成（なければデフォルト）
+            const classes = Object.keys(appData.schedule || {});
+            const list = classes.length ? classes : ['21HR', '22HR', '23HR'];
+            
+            list.forEach(cls => {
                 const opt = document.createElement('option');
                 opt.value = cls; opt.textContent = cls;
                 if(cls === userSettings.classId) opt.selected = true;
@@ -341,40 +364,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const path = 'data.json';
             const apiUrl = `https://api.github.com/repos/${gh.user}/${gh.repo}/contents/${path}`;
-            const content = btoa(unescape(encodeURIComponent(JSON.stringify(appData, null, 2)))); // Base64化
+            // 日本語文字化け防止のためにUnicodeエスケープなどが必要な場合があるが、
+            // ここでは簡易的に Base64 エンコードを行う
+            const content = btoa(unescape(encodeURIComponent(JSON.stringify(appData, null, 2))));
 
             try {
                 // 1. ファイルのSHAを取得 (上書きに必要)
                 const getRes = await fetch(apiUrl, {
                     headers: { 'Authorization': `token ${gh.token}` }
                 });
-                if(!getRes.ok) throw new Error("リポジトリ情報の取得に失敗");
-                const getData = await getRes.json();
-                const sha = getData.sha;
+                
+                // 初回作成時などで404ならshaは不要だが、基本は更新なので取得する
+                let sha = null;
+                if(getRes.ok) {
+                    const getData = await getRes.json();
+                    sha = getData.sha;
+                }
 
                 // 2. ファイルを更新 (PUT)
+                const bodyData = {
+                    message: "Update data.json from Admin Dashboard",
+                    content: content
+                };
+                if(sha) bodyData.sha = sha;
+
                 const putRes = await fetch(apiUrl, {
                     method: 'PUT',
                     headers: {
                         'Authorization': `token ${gh.token}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        message: "Update data.json from Admin Dashboard",
-                        content: content,
-                        sha: sha
-                    })
+                    body: JSON.stringify(bodyData)
                 });
 
                 if(putRes.ok) {
                     statusEl.textContent = "更新成功！全生徒に反映されました。";
                     statusEl.style.color = "green";
                 } else {
-                    throw new Error("更新リクエスト失敗");
+                    const err = await putRes.json();
+                    throw new Error(err.message || "更新失敗");
                 }
             } catch (e) {
                 console.error(e);
-                statusEl.textContent = "エラー: 設定を確認してください (権限不足など)";
+                statusEl.textContent = "エラー: " + e.message;
                 statusEl.style.color = "red";
             }
         };
